@@ -5,25 +5,18 @@ require('dotenv').config();
 
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
-const productRoutes = require('./routes/product.routes');  // ← NUEVO
-const cartRoutes = require('./routes/cart.routes');        // ← NUEVO
+const productRoutes = require('./routes/product.routes');
+const cartRoutes = require('./routes/cart.routes'); // ← esta línea debe existir
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// Rutas originales
+// Rutas existentes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-
-// Rutas nuevas
 app.use('/api/products', productRoutes);
-app.use('/api/cart', cartRoutes);
-
-// Ruta raíz (opcional)
-app.get('/', (req, res) => {
-  res.send('API de SWGVIPASA funcionando');
-});
+app.use('/api/cart', cartRoutes); // ← verifica que coincida
 
 module.exports = app;
