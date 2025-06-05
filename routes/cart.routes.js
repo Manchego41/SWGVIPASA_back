@@ -1,7 +1,7 @@
 // routes/cart.routes.js
 const express = require('express');
 const router = express.Router();
-const { getCart, addToCart, removeFromCart } = require('../controllers/cart.controller');
+const { getCart, addToCart, removeFromCart } = require('../controllers/cart.controllers');
 
 // GET /api/cart → Obtener carrito del usuario
 router.get('/', getCart);
