@@ -1,17 +1,11 @@
-// routes/cart.routes.js
-const router = require('express').Router();
-const cartController = require('../controllers/cart.controller');
+const express = require('express');
+const { getCart, addToCart, removeFromCart } = require('../controllers/cart.controller');
+const { protect } = require('../middleware/auth.middleware');
+const router = express.Router();
 
-// Crear carrito
-router.post('/', cartController.createCart);
-
-// Obtener carrito por userId
-router.get('/:userId', cartController.getCart);
-
-// Actualizar carrito por cartId (_id)
-router.put('/:id', cartController.updateCart);
-
-// Eliminar carrito por cartId (_id)
-router.delete('/:id', cartController.deleteCart);
+router.use(protect);
+router.get('/', getCart);
+router.post('/', addToCart);
+router.delete('/:productId', removeFromCart);
 
 module.exports = router;

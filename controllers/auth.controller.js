@@ -1,42 +1,32 @@
-// SWGVIPASA_back/controllers/auth.controller.js
-const jwt    = require('jsonwebtoken');
-const User   = require('../models/user.model');
+const jwt  = require('jsonwebtoken');
+const User = require('../models/user.model');
 require('dotenv').config();
 
 const generateToken = user =>
-  jwt.sign(
-    { id: user._id, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: '7d' }
-  );
+  jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+    expiresIn: '7d'
+  });
 
 exports.register = async (req, res) => {
   try {
-    const { name, username, email, password } = req.body;
-    if (!name || !username || !email || !password)
-      return res.status(400).json({ message: 'Faltan campos obligatorios' });
+    const { name, email, password } = req.body;
+    if (!name || !email || !password)
+      return res.status(400).json({ message: 'Faltan campos' });
 
-    // Validación adicional ya está en el schema
-    const exists = await User.findOne({
-      $or: [{ email }, { username }]
-    });
+    const exists = await User.findOne({ email });
     if (exists)
-      return res.status(400).json({ message: 'Email o usuario ya registrado' });
+      return res.status(400).json({ message: 'Email ya registrado' });
 
-    const user = await User.create({ name, username, email, password });
+    const user = await User.create({ name, email, password });
     const token = generateToken(user);
 
     res.json({
-      user: {
-        id: user._id, name: user.name,
-        username: user.username, email: user.email,
-        role: user.role
-      },
+      user: { id: user._id, name: user.name, email: user.email, role: user.role },
       token
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Error al registrar usuario' });
+    res.status(500).json({ message: 'Error al registrar' });
   }
 };
 
@@ -52,11 +42,7 @@ exports.login = async (req, res) => {
 
     const token = generateToken(user);
     res.json({
-      user: {
-        id: user._id, name: user.name,
-        username: user.username, email: user.email,
-        role: user.role
-      },
+      user: { id: user._id, name: user.name, email: user.email, role: user.role },
       token
     });
   } catch (error) {
