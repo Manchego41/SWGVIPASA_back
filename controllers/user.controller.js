@@ -1,21 +1,46 @@
-const User = require('../models/user.model');
+const User = require('../models/User');
 
-exports.getProfile = async (req, res) => {
-  const user = await User.findById(req.user.id).select('-password');
+// GET /api/users
+exports.getAllUsers = async (req, res) => {
+  const users = await User.find().select('-password');
+  res.json(users);
+};
+
+// GET /api/users/:id
+exports.getUserById = async (req, res) => {
+  const user = await User.findById(req.params.id).select('-password');
+  if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
   res.json(user);
 };
 
-exports.updateProfile = async (req, res) => {
-  const user = await User.findById(req.user.id);
+// PUT /api/users/:id/role
+exports.updateUserRole = async (req, res) => {
+  const { role } = req.body;
+  const user = await User.findById(req.params.id);
   if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
+  user.role = role;
+  await user.save();
+  res.json({ message: 'Rol actualizado' });
+};
 
+// DELETE /api/users/:id
+exports.deleteUser = async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) return res.status(404).json({ message: 'Usuario no encontrado' });
+  await user.remove();
+  res.json({ message: 'Usuario eliminado' });
+};
+
+// GET/PUT /api/users/me
+exports.getMe = async (req, res) => {
+  res.json(req.user);
+};
+
+exports.updateMe = async (req, res) => {
   const { name, email } = req.body;
-  if (email && !email.endsWith('@gmail.com')) {
-    return res.status(400).json({ message: 'Correo debe ser @gmail.com' });
-  }
-
-  user.name  = name  || user.name;
-  user.email = email || user.email;
+  const user = await User.findById(req.user._id);
+  if (name) user.name = name;
+  if (email) user.email = email;
   await user.save();
   res.json({ message: 'Perfil actualizado' });
 };

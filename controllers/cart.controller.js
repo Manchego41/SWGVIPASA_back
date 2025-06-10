@@ -1,37 +1,34 @@
-const Cart = require('../models/cart.model');
+const CartItem = require('../models/CartItem');
 
-exports.getCart = async (req, res) => {
-  const userId = req.user.id;
-  let cart = await Cart.findOne({ user: userId }).populate('items.product');
-  if (!cart) cart = await Cart.create({ user: userId, items: [] });
-  res.json({ items: cart.items });
-};
-
-exports.addToCart = async (req, res) => {
-  const userId = req.user.id;
+// POST /api/cart    -> añadir o incrementar
+exports.addCart = async (req, res) => {
+  const userId = req.user._id;
   const { productId } = req.body;
 
-  let cart = await Cart.findOne({ user: userId });
-  if (!cart) cart = await Cart.create({ user: userId, items: [] });
-
-  const item = cart.items.find(i => i.product.toString() === productId);
+  let item = await CartItem.findOne({ user: userId, product: productId });
   if (item) {
-    item.quantity += 1;
+    item.quantity++;
+    await item.save();
   } else {
-    cart.items.push({ product: productId, quantity: 1 });
+    item = await CartItem.create({ user: userId, product: productId });
   }
-  await cart.save();
-  res.json(cart);
+  // poblamos para devolver info de producto
+  await item.populate('product');
+  res.status(201).json(item);
 };
 
-exports.removeFromCart = async (req, res) => {
-  const userId = req.user.id;
-  const { productId } = req.params;
+// GET /api/cart    -> listar carrito
+exports.getCart = async (req, res) => {
+  const userId = req.user._id;
+  const items = await CartItem
+    .find({ user: userId })
+    .populate('product');
+  res.json(items);
+};
 
-  let cart = await Cart.findOne({ user: userId });
-  if (!cart) return res.status(404).json({ message: 'Carrito vacío' });
-
-  cart.items = cart.items.filter(i => i.product.toString() !== productId);
-  await cart.save();
-  res.json(cart);
+// DELETE /api/cart/:id   -> quitar un ítem
+exports.removeCart = async (req, res) => {
+  const { id } = req.params;
+  await CartItem.findByIdAndDelete(id);
+  res.json({ message: 'Ítem eliminado' });
 };

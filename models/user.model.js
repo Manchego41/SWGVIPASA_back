@@ -1,11 +1,9 @@
-const mongoose = require('mongoose');
-const bcrypt   = require('bcryptjs');
+const mongoose = require('mongoose')
+const bcrypt   = require('bcryptjs')
 
 const userSchema = new mongoose.Schema({
   name: {
-    type: String,
-    required: true,
-    trim: true
+    type: String, required: true, trim: true
   },
   email: {
     type: String,
@@ -15,31 +13,24 @@ const userSchema = new mongoose.Schema({
     trim: true,
     validate: {
       validator: v => v.endsWith('@gmail.com'),
-      message: 'Sólo correos @gmail.com'
+      message: 'Solo correos @gmail.com'
     }
   },
   password: {
-    type: String,
-    required: true,
-    minlength: 6
+    type: String, required: true, minlength: 6
   },
   role: {
     type: String,
     enum: ['administrador','vendedor','cliente'],
     default: 'cliente'
   }
-});
+})
 
-// Hash de contraseña
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-  next();
-});
+  if (!this.isModified('password')) return next()
+  const salt = await bcrypt.genSalt(10)
+  this.password = await bcrypt.hash(this.password, salt)
+  next()
+})
 
-userSchema.methods.matchPassword = function(enteredPassword) {
-  return bcrypt.compare(enteredPassword, this.password);
-};
-
-module.exports = mongoose.model('User', userSchema);
+module.exports = mongoose.model('User', userSchema)
