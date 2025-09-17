@@ -10,13 +10,14 @@ const {
 const { protect, isAdmin } = require('../middlewares/auth.middleware');
 
 // Listado público
+// routes/product.routes.js
 router.route('/')
-  .get(getAllProducts)
+  .get(getAllProducts) // ← SIN 'protect, isAdmin'
   .post(protect, isAdmin, createProduct);
 
-// CRUD privado
+// ✅ RUTA PÚBLICA - Cualquiera puede ver un producto específico  
 router.route('/:id')
-  .get(protect, isAdmin, getProductById)
+  .get(getProductById) // ← SIN 'protect, isAdmin'
   .put(protect, isAdmin, updateProduct)
   .delete(protect, isAdmin, deleteProduct);
 
