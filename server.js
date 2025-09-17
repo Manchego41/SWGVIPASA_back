@@ -1,16 +1,20 @@
-// server.js
 require('dotenv').config();
+const express = require('express');
 const mongoose = require('mongoose');
+const cors = require('cors');
 
-// Ajusta esta ruta si tu app.js está en otro sitio
-// Si tu app.js está en la raíz del proyecto:
-const app = require('./app');
+const app = express();
 
-// Si está en src/app.js, usa:
-// const app = require('./src/app');
+// Middlewares
+app.use(cors());
+app.use(express.json());
+
+// Rutas
+const reportRoutes = require('./src/routes/report.routes');
+app.use('/api/reports', reportRoutes);
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tu_bd';
-const PORT     = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5000;
 
 mongoose
   .connect(MONGO_URI)
@@ -21,6 +25,6 @@ mongoose
     });
   })
   .catch(err => {
-    console.error('Error al conectar MongoDB:', err);
+    console.error('❌ Error al conectar MongoDB:', err);
     process.exit(1);
   });
