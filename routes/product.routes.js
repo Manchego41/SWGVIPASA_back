@@ -1,23 +1,23 @@
+// routes/product.routes.js
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
+
+const { protect, isAdmin } = require('../middlewares/auth.middleware');
 const {
-  createProduct,
-  getAllProducts,
+  listProducts,
   getProductById,
+  createProduct,
   updateProduct,
   deleteProduct,
 } = require('../controllers/product.controller');
-const { protect, isAdmin } = require('../middlewares/auth.middleware');
 
-// Listado público
-router.route('/')
-  .get(getAllProducts)
-  .post(protect, isAdmin, createProduct);
+// Público (si quieres que listar sea público, deja sin protect)
+router.get('/', listProducts);
+router.get('/:id', getProductById);
 
-// CRUD privado
-router.route('/:id')
-  .get(protect, isAdmin, getProductById)
-  .put(protect, isAdmin, updateProduct)
-  .delete(protect, isAdmin, deleteProduct);
+// Solo admin
+router.post('/',    protect, isAdmin, createProduct);
+router.put('/:id',  protect, isAdmin, updateProduct);
+router.delete('/:id', protect, isAdmin, deleteProduct);
 
 module.exports = router;
