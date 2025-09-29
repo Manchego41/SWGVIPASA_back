@@ -12,7 +12,7 @@ const PurchaseSchema = new mongoose.Schema({
   user:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   items:  { type: [PurchaseItemSchema], required: true },
   total:  { type: Number, required: true },
-  status: { type: String, enum: ['recorded'], default: 'recorded' }
+  status: { type: String, enum: ['recorded', 'returned'], default: 'recorded' }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Purchase', PurchaseSchema);

@@ -1,6 +1,8 @@
 // controllers/user.controller.js
 const mongoose = require('mongoose');
 const User = require('../models/User');
+const Purchase = require('../models/purchase.model');
+
 
 // GET /api/users
 exports.getAllUsers = async (req, res) => {
@@ -93,7 +95,54 @@ exports.getClientsWithPurchases = async (_req, res) => {
     });
   }
 };
+// GET /api/users/me/purchases
+exports.getMyPurchases = async (req, res) => {
+  try {
+    const list = await Purchase.find({ user: req.user._id })
+      .sort({ createdAt: -1 })
+      .populate('items.product', 'name price');
+    res.json(list);
+  } catch (e) {
+    console.error('getMyPurchases error:', e);
+    res.status(500).json({ message: 'Error obteniendo compras' });
+  }
+};
 
+// GET /api/users/me/purchases/:id
+exports.getMyPurchaseById = async (req, res) => {
+  try {
+    const purchase = await Purchase.findById(req.params.id)
+      .populate('items.product', 'name price');
+    if (!purchase) return res.status(404).json({ message: 'Compra no encontrada' });
+    if (purchase.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    res.json(purchase);
+  } catch (e) {
+    console.error('getMyPurchaseById error:', e);
+    res.status(500).json({ message: 'Error obteniendo compra' });
+  }
+};
+
+// PUT /api/users/me/purchases/:id/return
+exports.returnMyPurchase = async (req, res) => {
+  try {
+    const purchase = await Purchase.findById(req.params.id);
+    if (!purchase) return res.status(404).json({ message: 'Compra no encontrada' });
+    if (purchase.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    if (purchase.status === 'returned') {
+      return res.status(400).json({ message: 'Ya fue devuelta' });
+    }
+    purchase.status = 'returned';
+    await purchase.save();
+    res.json({ message: 'Compra devuelta con éxito', purchase });
+  } catch (e) {
+    console.error('returnMyPurchase error:', e);
+    res.status(500).json({ message: 'Error devolviendo compra' });
+  }
+};
 /**
  * GET /api/users/clients-with-count
  * TODOS los clientes + purchasesCount (0 si no tiene).
