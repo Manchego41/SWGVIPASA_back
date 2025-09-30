@@ -2,15 +2,17 @@
 require('dotenv').config();
 const mongoose = require('mongoose');
 
-// Ajusta esta ruta si tu app.js está en otro sitio
-// Si tu app.js está en la raíz del proyecto:
+// Importamos la app de Express
 const app = require('./app');
 
-// Si está en src/app.js, usa:
-// const app = require('./src/app');
+// Importamos las rutas
+const salesRoutes = require("./routes/sales.routes");
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tu_bd';
 const PORT     = process.env.PORT || 5000;
+
+// Montamos la ruta
+app.use("/api/sales", salesRoutes);
 
 mongoose
   .connect(MONGO_URI)
