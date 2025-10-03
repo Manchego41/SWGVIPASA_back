@@ -8,6 +8,7 @@ const {
   getCart,
   removeCart,
   checkoutLocal,
+  updateCartQuantity,
 } = require('../controllers/cart.controller');
 
 // Aplica auth a todas las rutas del carrito
@@ -16,6 +17,7 @@ router.use(protect);
 router.post('/',       addCart);
 router.get('/',        getCart);
 router.delete('/:id',  removeCart);
+router.patch('/:id', updateCartQuantity);
 
 // Checkout local (sin pasarela): guarda historial + vacía carrito
 router.post('/checkout-local', checkoutLocal);

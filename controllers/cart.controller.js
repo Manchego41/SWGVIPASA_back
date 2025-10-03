@@ -44,6 +44,41 @@ const removeCart = async (req, res) => {
   }
 };
 
+// Actualiza la cantidad de un ítem del carrito
+const updateCartQuantity = async (req, res) => {
+  try {
+    const userId   = req.user._id;
+    const { id }   = req.params;        // id del CartItem
+    const { quantity } = req.body;      // nueva cantidad
+
+    const qty = Number(quantity);
+    if (!Number.isInteger(qty) || qty < 0) {
+      return res.status(400).json({ message: 'Cantidad inválida' });
+    }
+
+    const item = await CartItem.findOne({ _id: id, user: userId });
+    if (!item) {
+      return res.status(404).json({ message: 'Ítem no encontrado' });
+    }
+
+    if (qty === 0) {
+      await item.deleteOne();
+      return res.status(204).send(); // sin contenido
+    }
+
+    item.quantity = qty;
+    await item.save();
+
+    // opcional: devolver con el producto populado para que el front tenga todo
+    const populated = await CartItem.findById(item._id).populate('product');
+    return res.json(populated);
+  } catch (err) {
+    console.error('updateCartQuantity error:', err);
+    return res.status(500).json({ message: 'Error actualizando la cantidad' });
+  }
+};
+
+
 const checkoutLocal = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -82,4 +117,5 @@ module.exports = {
   getCart,
   removeCart,
   checkoutLocal,
+  updateCartQuantity,
 };
