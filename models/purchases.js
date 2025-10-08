@@ -1,14 +1,14 @@
 const mongoose = require("mongoose");
 
-const saleSchema = new mongoose.Schema({
+const purchaseSchema = new mongoose.Schema({
   product: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Product", // referencia al producto vendido
+    ref: "Product", // referencia al producto comprado
     required: true,
   },
   user: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "User", // referencia al usuario que compra
+    ref: "User", // referencia al usuario que realiza la compra
     required: true,
   },
   quantity: {
@@ -26,4 +26,5 @@ const saleSchema = new mongoose.Schema({
   },
 });
 
-module.exports = mongoose.model("Sale", saleSchema);
+// El tercer parámetro "purchases" fuerza a Mongoose a usar esa colección
+module.exports = mongoose.model("Purchase", purchaseSchema, "purchases");

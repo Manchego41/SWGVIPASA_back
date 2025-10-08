@@ -1,35 +1,34 @@
-// routes/sales.routes.js
 const express = require("express");
 const router = express.Router();
-const Sale = require("../models/Sale");
+const Purchase = require("../models/purchases");
 
-// 📌 Obtener todas las ventas (para el dashboard)
 router.get("/", async (req, res) => {
   try {
-    const sales = await Sale.find()
+    const purchases = await Purchase.find()
       .populate("product", "name price") // muestra info básica del producto
       .populate("user", "name email");   // muestra info básica del usuario
-    res.json(sales);
+    res.json(purchases);
   } catch (err) {
+    console.error("Error al obtener purchases:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// 📌 Registrar una venta (ejemplo, lo podrías conectar al checkout)
 router.post("/", async (req, res) => {
   try {
     const { product, user, quantity, total } = req.body;
 
-    const newSale = new Sale({
+    const newPurchase = new Purchase({
       product,
       user,
       quantity,
       total,
     });
 
-    const savedSale = await newSale.save();
-    res.status(201).json(savedSale);
+    const savedPurchase = await newPurchase.save();
+    res.status(201).json(savedPurchase);
   } catch (err) {
+    console.error("Error al registrar purchase:", err);
     res.status(500).json({ error: err.message });
   }
 });
