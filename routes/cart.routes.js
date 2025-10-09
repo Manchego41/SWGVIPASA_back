@@ -11,7 +11,8 @@ const {
 } = require('../controllers/cart.controller');
 
 // Aplica auth a todas las rutas del carrito
-router.use(protect);
+router.use(protect);         // <-- requiere JWT
+router.post('/', addCart);
 
 router.post('/',       addCart);
 router.get('/',        getCart);
