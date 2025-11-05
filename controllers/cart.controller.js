@@ -2,6 +2,9 @@
 const CartItem = require('../models/CartItem');
 const Purchase = require('../models/purchase.model');
 
+const fs   = require('fs');
+const path = require('path');
+
 // POST /api/cart  { productId }
 // - Si existe el item => incrementa quantity
 // - Si no existe     => crea con quantity=1
@@ -112,9 +115,78 @@ const checkoutLocal = async (req, res) => {
   }
 };
 
+
+// POST /cart/checkout  (JSON o multipart con 'voucher')
+// - Si viene multipart: JSON vendrá en req.body.payload (string)
+async function checkoutUnified(req, res) {
+  try {
+    // 1) Obtener payload (JSON o multipart)
+    let payload = req.body.payload ? JSON.parse(req.body.payload) : req.body;
+
+    const {
+      method,     // 'visa' | 'yape' | 'plin' | 'efectivo'
+      buyer,      // { name, email }
+      coupon,     // opcional
+      totals,     // { subtotal, discount, fee, total }
+      items,      // [{ id, qty, price }]
+      extra       // { transactionId?, token? }
+    } = payload || {};
+
+    // 2) Validaciones mínimas
+    if (!buyer?.name || !buyer?.email) {
+      return res.status(400).json({ ok: false, message: 'Faltan datos del comprador.' });
+    }
+    if (!method) {
+      return res.status(400).json({ ok: false, message: 'Falta método de pago.' });
+    }
+
+    // 3) Guardar voucher si vino archivo (Yape/Plin)
+    let voucherPath = null;
+    if (req.file) {
+      const uploadsDir = path.join(process.cwd(), 'uploads');
+      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
+      const safeName = `${Date.now()}_${req.file.originalname.replace(/\s+/g,'_')}`;
+      const newPath = path.join(uploadsDir, safeName);
+      fs.renameSync(req.file.path, newPath);
+      voucherPath = `/uploads/${safeName}`; // ruta pública si sirves estáticos
+    }
+
+    // 4) Lógica por método (aquí solo simulación)
+    //    TODO: acá validar stock, precios contra BD y crear el Order real
+    let status = 'pending_review';
+    if (method === 'efectivo') status = 'pending_cash';
+    if (method === 'visa')     status = 'paid'; // cuando integres pasarela, cambia según respuesta
+
+    // 5) Simular creación de orderId
+    const orderId = Math.random().toString(36).substring(2, 10);
+
+    // 6) (Opcional) Vaciar carrito del usuario y guardar en historial
+    //    Puedes reutilizar parte de checkoutLocal si lo deseas
+
+    return res.json({
+      ok: true,
+      orderId,
+      status,
+      received: {
+        method,
+        buyer,
+        coupon: coupon || null,
+        totals,
+        itemsCount: Array.isArray(items) ? items.length : 0,
+        transactionId: extra?.transactionId || null,
+        voucherPath
+      }
+    });
+  } catch (err) {
+    console.error('❌ Error en checkoutUnified:', err);
+    return res.status(500).json({ ok: false, message: 'Error procesando checkout' });
+  }
+}
+
 module.exports = {
   addCart,
   getCart,
   removeCart,
   checkoutLocal,
+  checkoutUnified,
 };
