@@ -7,13 +7,9 @@ const {
   getPayment,
 } = require('../controllers/payment.controller');
 
-// Crear preferencia (sandbox)
+// ✅ Rutas públicas (NO usan protect)
 router.post('/create-preference', createPaymentPreference);
-
-// Webhook de MP
 router.post('/webhook', webhook);
-
-// Consultar pago (opcional)
 router.get('/:payment_id', getPayment);
 
 module.exports = router;

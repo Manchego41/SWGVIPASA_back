@@ -9,9 +9,11 @@ const PUBLIC_URL = process.env.PUBLIC_URL || FRONT_URL;
 const mpClient = new MercadoPagoConfig({ accessToken: MP_ACCESS_TOKEN });
 
 // POST /api/payments/create-preference
+// body: { items: [{ title, unit_price, quantity, currency_id }] }
 exports.createPaymentPreference = async (req, res) => {
   try {
     const bodyItems = Array.isArray(req.body?.items) ? req.body.items : [];
+
     const items = bodyItems.length > 0 ? bodyItems : [
       { title: 'Item de prueba', unit_price: 10, quantity: 1, currency_id: 'PEN' },
     ];
@@ -87,5 +89,4 @@ exports.getPayment = async (req, res) => {
     return res.status(500).json({ message: 'Error consultando pago' });
   }
 };
-
 
