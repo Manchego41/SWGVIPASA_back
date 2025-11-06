@@ -1,3 +1,4 @@
+// app.js
 const express = require('express');
 const cors = require('cors');
 
@@ -14,16 +15,22 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// --- Servir archivos subidos ---
-app.use('/uploads', express.static('uploads'));
-
 // --- CORS ---
+// Permitimos llamadas desde el front (Vite por defecto en 5173)
+// Puedes cambiar FRONT_URL en tu .env si fuera otro dominio.
+const allowedOrigins = [process.env.FRONT_URL || 'http://localhost:5173'];
+
 app.use(
   cors({
-    origin: ['http://localhost:5000', 'http://localhost:5000'],
+    origin: allowedOrigins,
     credentials: true,
   })
 );
+
+
+
+// --- Servir archivos subidos ---
+app.use('/uploads', express.static('uploads'));
 
 // --- Rutas principales ---
 app.use('/api/auth', authRoutes);

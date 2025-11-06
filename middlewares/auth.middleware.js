@@ -1,32 +1,52 @@
+// middlewares/auth.middleware.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+// Protege rutas: requiere un token Bearer válido
 exports.protect = async (req, res, next) => {
-  let token;
-  if (req.headers.authorization?.startsWith('Bearer')) {
-  token = req.headers.authorization.split(' ')[1];
-} else return res.status(401).json({ message: 'No token...' })
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith('Bearer')
-  ) {
-    token = req.headers.authorization.split(' ')[1];
-  }
-  if (!token) {
-    return res.status(401).json({ message: 'No token, autorización denegada' });
-  }
   try {
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+
+    if (!token) {
+      return res.status(401).json({ message: 'No se envió token (Authorization: Bearer <token>)' });
+    }
+
+    // Verificar token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await User.findById(decoded.id).select('-password');
-    next();
+    if (!decoded?.id) {
+      return res.status(401).json({ message: 'Token inválido' });
+    }
+
+    // Cargar usuario (sin contraseña)
+    const user = await User.findById(decoded.id).select('-password');
+    if (!user) {
+      return res.status(401).json({ message: 'Usuario no válido' });
+    }
+
+    // Adjuntar usuario a la request y seguir
+    req.user = user;
+    return next();
   } catch (err) {
-    res.status(401).json({ message: 'Token no válido' });
+    // Expirado o inválido
+    return res.status(401).json({ message: 'Token inválido o expirado' });
   }
 };
 
+// Solo permite rol "administrador"
 exports.isAdmin = (req, res, next) => {
   if (!req.user || req.user.role !== 'administrador') {
-    return res.status(403).json({ message: 'Acceso prohibido: administrador only' });
+    return res.status(403).json({ message: 'Acceso prohibido: se requiere rol administrador' });
   }
-  next();
+  return next();
+};
+
+// (Opcional) Permitir uno o varios roles: isRole('administrador'), isRole('vendedor','administrador'), etc.
+exports.isRole = (...rolesPermitidos) => {
+  return (req, res, next) => {
+    if (!req.user || !rolesPermitidos.includes(req.user.role)) {
+      return res.status(403).json({ message: 'Acceso prohibido: rol no autorizado' });
+    }
+    return next();
+  };
 };

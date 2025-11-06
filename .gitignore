@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+uploads/
+.DS_Store
+Thumbs.db
+.nyc_output/
+.vscode/
+.idea/
