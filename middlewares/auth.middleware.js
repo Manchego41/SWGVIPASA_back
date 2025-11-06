@@ -5,34 +5,29 @@ const jwt = require('jsonwebtoken');
 // Rutas públicas exactas y prefijos permitidos sin JWT
 const PUBLIC_EXACT = new Set([
   '/status',
-  // agrega aquí otras exactas si quieres dejarlas públicas
-  // '/api/products', '/api/auth/login', '/api/auth/register',
+  // agrega aquí otras exactas si quieres
+  // '/api/auth/login',
+  // '/api/auth/register',
 ]);
 
 const PUBLIC_PREFIXES = [
-  '/api/payments',            // ✅ todo pagos SIN JWT
-  // agrega otros prefijos públicos si quieres
+  '/api/payments', // ✅ todo lo de pagos SIN JWT
 ];
 
 exports.protect = async (req, res, next) => {
   try {
-    // Normaliza la ruta completa de la request
     const fullPath =
       (req.baseUrl ? String(req.baseUrl) : '') +
       (req.path ? String(req.path) : '');
 
-    // Permitir preflight CORS sin token
+    // Preflight CORS
     if (req.method === 'OPTIONS') return next();
 
-    // Permitir rutas exactas públicas
+    // Rutas públicas
     if (PUBLIC_EXACT.has(fullPath)) return next();
+    if (PUBLIC_PREFIXES.some(prefix => fullPath.startsWith(prefix))) return next();
 
-    // Permitir prefijos públicos (por ejemplo /api/payments/**)
-    if (PUBLIC_PREFIXES.some(prefix => fullPath.startsWith(prefix))) {
-      return next();
-    }
-
-    // --- A partir de aquí, exige JWT ---
+    // --- Desde aquí, JWT requerido ---
     const auth = req.headers.authorization || '';
     const [type, token] = auth.split(' ');
 
@@ -43,6 +38,7 @@ exports.protect = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // Ajusta si tu token usa otras claves
     req.user = { id: decoded.id, role: decoded.role, name: decoded.name };
 
     return next();
@@ -50,4 +46,17 @@ exports.protect = async (req, res, next) => {
     return res.status(401).json({ message: 'Token inválido o expirado' });
   }
 };
+
+// ✅ Middleware de admin requerido por tus rutas
+exports.isAdmin = (req, res, next) => {
+  try {
+    if (!req.user || req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Acceso denegado (admin)' });
+    }
+    return next();
+  } catch {
+    return res.status(403).json({ message: 'Acceso denegado (admin)' });
+  }
+};
+
 
