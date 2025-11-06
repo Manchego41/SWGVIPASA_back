@@ -1,18 +1,20 @@
-// routes/payment.routes.js (ya existe con estos nombres)
+// routes/payment.routes.js
 const express = require('express');
 const router = express.Router();
-const { 
-  createPaymentPreference, 
-  webhook, 
-  getPayment 
+const {
+  createPaymentPreference,
+  webhook,
+  getPayment,
 } = require('../controllers/payment.controller');
-const { protect } = require('../middlewares/auth.middleware');
 
-// Crear preferencia (usuario logueado)
-router.post('/create-preference', protect, createPaymentPreference);
-// Webhook (punto público, sin auth)
+// Crear preferencia (sandbox)
+router.post('/create-preference', createPaymentPreference);
+
+// Webhook de MP
 router.post('/webhook', webhook);
-// Consultar pago puntual
-router.get('/:payment_id', protect, getPayment);
+
+// Consultar pago (opcional)
+router.get('/:payment_id', getPayment);
 
 module.exports = router;
+
