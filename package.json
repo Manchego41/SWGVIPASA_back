@@ -13,10 +13,10 @@
   "dependencies": {
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.5.0",
+    "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
-    "mercadopago": "^1.5.8",
+    "mercadopago": "^1.5.17",
     "mongoose": "^8.15.1",
     "nodemailer": "^7.0.3",
     "pdfkit": "^0.17.1"
