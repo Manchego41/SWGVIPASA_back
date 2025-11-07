@@ -1,3 +1,5 @@
+// models/SimulatedPayment.js
+
 const mongoose = require('mongoose');
 
 const SimulatedPaymentSchema = new mongoose.Schema({

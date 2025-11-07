@@ -1,3 +1,5 @@
+// controllers/simulatedPayment.controller.js
+
 const SimulatedPayment = require('../models/SimulatedPayment');
 const CartItem = require('../models/CartItem');
 
