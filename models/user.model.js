@@ -20,7 +20,10 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, minlength: 6 },
     role: { type: String, enum: ['administrador','vendedor','cliente'], default: 'cliente' },
 
-    // Campos opcionales que usabas en el otro archivo
+    // NUEVO: favoritos por usuario (ids de Product)
+    favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
+
+    // Campos opcionales que ya tenías
     resetPasswordToken:   String,
     resetPasswordExpires: Date
   },
