@@ -126,7 +126,7 @@ exports.createMyReturn = async (req, res) => {
         }
       }
 
-      const importe = unitPrice * q;
+      const importe = (unitPrice || 0) * q;
       total += importe;
 
       // Guardar referencia product (si existe) para poder populate luego
@@ -139,7 +139,7 @@ exports.createMyReturn = async (req, res) => {
       normalizedItems.push({
         product: productRef,          // ObjectId ref: 'Product' (si no existe, queda undefined)
         productName: src.name || sel.productName || '',
-        unitPrice: unitPrice,
+        unitPrice: unitPrice || 0,
         quantity: q
       });
     }
@@ -185,6 +185,42 @@ exports.getMyReturns = async (req, res) => {
   }
 };
 
+/**
+ * Permite al usuario dueño cancelar su devolución si está en estado 'processing'.
+ * PATCH /api/returns/:id/cancel
+ */
+exports.cancelMyReturn = async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!id || !mongoose.isValidObjectId(id)) return res.status(400).json({ message: 'Id inválido' });
+
+    const row = await Return.findById(id);
+    if (!row) return res.status(404).json({ message: 'No encontrado' });
+
+    // solo el usuario dueño puede cancelar su RMA
+    if (String(row.user) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+
+    if (row.status !== 'processing') {
+      return res.status(400).json({ message: 'Solo devoluciones en estado "processing" pueden ser canceladas' });
+    }
+
+    row.status = 'canceled';
+    await row.save();
+
+    const populated = await Return.findById(row._id)
+      .populate('user', 'name email')
+      .populate('items.product', 'name price imageUrl')
+      .lean();
+
+    return res.json(populated);
+  } catch (e) {
+    console.error('cancelMyReturn error', e);
+    return res.status(500).json({ message: 'Error cancelando devolución' });
+  }
+};
+
 /* ------------------------ ADMIN ------------------------ */
 function requireAdmin(req, res) {
   if (req.user?.role !== 'administrador') {
@@ -224,21 +260,54 @@ exports.adminGet = async (req, res) => {
   }
 };
 
+/**
+ * adminSetStatus: ahora restringido a los tres estados solicitados por ti.
+ * Además: si la devolución ya está en 'canceled' NO se puede cambiar.
+ * PATCH /api/returns/:id/status
+ */
 exports.adminSetStatus = async (req, res) => {
   if (!requireAdmin(req, res)) return;
   const status = String(req.body.status || '').trim();
-  const allowed = ['processing','approved','rejected','completed','canceled'];
+  // Solo permitimos estos tres desde admin UI
+  const allowed = ['processing','approved','rejected'];
   if (!allowed.includes(status)) {
-    return res.status(400).json({ message: 'Estado inválido' });
+    return res.status(400).json({ message: 'Estado inválido (solo processing/approved/rejected)' });
   }
   try {
+    // recuperar documento para validar estado actual
+    const existing = await Return.findById(req.params.id);
+    if (!existing) return res.status(404).json({ message: 'No encontrado' });
+
+    // si ya fue cancelado por el cliente, no permitir cambios desde admin
+    if (existing.status === 'canceled') {
+      return res.status(400).json({ message: 'La devolución fue cancelada por el cliente y no puede ser modificada' });
+    }
+
+    // proceder al update
     const row = await Return.findByIdAndUpdate(
       req.params.id,
       { $set: { status } },
       { new: true }
     );
     if (!row) return res.status(404).json({ message: 'No encontrado' });
-    res.json(row);
+
+    const populated = await Return.findById(row._id)
+      .populate('user', 'name email')
+      .populate('items.product', 'name price imageUrl')
+      .lean();
+
+    // opcional: enviar correo automático cuando se aprueba/rechaza (si tienes mailer)
+    try {
+      if (sendMail && (status === 'approved' || status === 'rejected')) {
+        const subj = status === 'approved' ? `Devolución ${row.code || row._id} ACEPTADA` : `Devolución ${row.code || row._id} RECHAZADA`;
+        const text = `Su solicitud ${row.code || row._id} ha sido ${status === 'approved' ? 'aceptada' : 'rechazada'}.`;
+        await sendMail({ to: (row.user && row.user.email) || '', subject: subj, text });
+      }
+    } catch (mailErr) {
+      console.warn('Mailer falló al notificar cambio de estado (se continúa):', mailErr?.message || mailErr);
+    }
+
+    res.json(populated);
   } catch (e) {
     console.error('adminSetStatus error', e);
     res.status(500).json({ message: 'Error actualizando estado' });

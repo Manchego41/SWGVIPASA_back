@@ -7,6 +7,7 @@ const ReturnCtrl = require('../controllers/return.controller');
 // Cliente
 router.post('/', protect, ReturnCtrl.createMyReturn);
 router.get('/mine', protect, ReturnCtrl.getMyReturns);
+router.patch('/:id/cancel', protect, ReturnCtrl.cancelMyReturn); // -> usuario dueño puede cancelar si está en processing
 
 // Admin
 router.get('/', protect, ReturnCtrl.adminList);
