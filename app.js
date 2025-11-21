@@ -10,6 +10,9 @@ const reportsRoutes   = require('./routes/reports.routes');
 const purchasesRoutes = require('./routes/purchase.routes');
 const favoritesRoutes = require('./routes/favorite.routes');
 const returnRoutes    = require('./routes/return.routes');
+const paymentRoutes = require('./routes/payment.routes');
+const mpWebhook = require("./routes/mp-webhook.routes");
+
 
 const app = express();
 
@@ -27,5 +30,7 @@ app.use('/api/reports',   reportsRoutes);
 app.use('/api/purchases', purchasesRoutes);
 app.use('/api/favorites', favoritesRoutes);
 app.use('/api/returns',  returnRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use("/webhook-mercado-pago", mpWebhook);
 
 module.exports = app;
