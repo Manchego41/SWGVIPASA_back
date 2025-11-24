@@ -126,7 +126,7 @@ exports.createMyReturn = async (req, res) => {
         }
       }
 
-      const importe = (unitPrice || 0) * q;
+      const importe = unitPrice * q;
       total += importe;
 
       // Guardar referencia product (si existe) para poder populate luego
@@ -139,7 +139,7 @@ exports.createMyReturn = async (req, res) => {
       normalizedItems.push({
         product: productRef,          // ObjectId ref: 'Product' (si no existe, queda undefined)
         productName: src.name || sel.productName || '',
-        unitPrice: unitPrice || 0,
+        unitPrice: unitPrice,
         quantity: q
       });
     }
@@ -262,7 +262,6 @@ exports.adminGet = async (req, res) => {
 
 /**
  * adminSetStatus: ahora restringido a los tres estados solicitados por ti.
- * Además: si la devolución ya está en 'canceled' NO se puede cambiar.
  * PATCH /api/returns/:id/status
  */
 exports.adminSetStatus = async (req, res) => {
@@ -274,21 +273,21 @@ exports.adminSetStatus = async (req, res) => {
     return res.status(400).json({ message: 'Estado inválido (solo processing/approved/rejected)' });
   }
   try {
-    // recuperar documento para validar estado actual
-    const existing = await Return.findById(req.params.id);
-    if (!existing) return res.status(404).json({ message: 'No encontrado' });
+    // buscamos primero para validar estado actual (no permitir cambiar si ya fue cancelado)
+    const current = await Return.findById(req.params.id);
+    if (!current) return res.status(404).json({ message: 'No encontrado' });
 
-    // si ya fue cancelado por el cliente, no permitir cambios desde admin
-    if (existing.status === 'canceled') {
-      return res.status(400).json({ message: 'La devolución fue cancelada por el cliente y no puede ser modificada' });
+    if (current.status === 'canceled') {
+      return res.status(400).json({ message: 'Devolución cancelada por el cliente. No se puede modificar.' });
     }
 
-    // proceder al update
+    // aplicar el cambio
     const row = await Return.findByIdAndUpdate(
       req.params.id,
       { $set: { status } },
       { new: true }
     );
+
     if (!row) return res.status(404).json({ message: 'No encontrado' });
 
     const populated = await Return.findById(row._id)
@@ -299,9 +298,9 @@ exports.adminSetStatus = async (req, res) => {
     // opcional: enviar correo automático cuando se aprueba/rechaza (si tienes mailer)
     try {
       if (sendMail && (status === 'approved' || status === 'rejected')) {
-        const subj = status === 'approved' ? `Devolución ${row.code || row._id} ACEPTADA` : `Devolución ${row.code || row._id} RECHAZADA`;
-        const text = `Su solicitud ${row.code || row._id} ha sido ${status === 'approved' ? 'aceptada' : 'rechazada'}.`;
-        await sendMail({ to: (row.user && row.user.email) || '', subject: subj, text });
+        const subj = status === 'approved' ? `Devolución ${populated.code || populated._id} ACEPTADA` : `Devolución ${populated.code || populated._id} RECHAZADA`;
+        const text = `Su solicitud ${populated.code || populated._id} ha sido ${status === 'approved' ? 'aceptada' : 'rechazada'}.`;
+        await sendMail({ to: (populated.user && populated.user.email) || '', subject: subj, text });
       }
     } catch (mailErr) {
       console.warn('Mailer falló al notificar cambio de estado (se continúa):', mailErr?.message || mailErr);

@@ -6,24 +6,37 @@ const User      = require('../models/User');
 const sendEmail = require('../utils/mailer');
 
 exports.register = async (req, res) => {
-  const { name, email, password } = req.body;
-  const hashed = await bcrypt.hash(password, 10);
-  await User.create({ name, email, password: hashed });
-  res.status(201).json({ message: 'Usuario registrado' });
+  try {
+    const { name, email, password } = req.body;
+    // IMPORTANTE: tu schema de User ya hace hashing en pre('save'),
+    // por eso aquí NO volvemos a hashear la contraseña (evita double-hash).
+    await User.create({ name, email, password });
+    res.status(201).json({ message: 'Usuario registrado' });
+  } catch (err) {
+    console.error('register error', err);
+    // manejar duplicados y otros errores
+    const msg = err?.code === 11000 ? 'El correo ya está registrado' : (err?.message || 'Error registrando usuario');
+    res.status(500).json({ message: msg });
+  }
 };
 
 exports.login = async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  if (!user || !(await user.matchPassword(password))) {
-    return res.status(401).json({ message: 'Correo o contraseña incorrectos' });
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user || !(await user.matchPassword(password))) {
+      return res.status(401).json({ message: 'Correo o contraseña incorrectos' });
+    }
+    const token = jwt.sign(
+      { id: user._id, role: user.role, name: user.name },
+      process.env.JWT_SECRET,
+      { expiresIn: '1d' }
+    );
+    res.json({ token, role: user.role, name: user.name });
+  } catch (err) {
+    console.error('login error', err);
+    res.status(500).json({ message: 'Error al iniciar sesión' });
   }
-  const token = jwt.sign(
-    { id: user._id, role: user.role, name: user.name },
-    process.env.JWT_SECRET,
-    { expiresIn: '1d' }
-  );
-  res.json({ token, role: user.role, name: user.name });
 };
 
 // POST /api/auth/forgot-password
@@ -31,11 +44,10 @@ exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
-    // Si no existe, devolvemos éxito genérico para no filtrar emails
+    // Si no existe, devolvemos éxito genérico
     if (!user) {
       return res.json({ message: 'Si el correo existe, recibirás instrucciones.' });
     }
-    // Generar token y guardarlo en BBDD (hasheado)
     const token = crypto.randomBytes(20).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
     user.resetPasswordToken   = hashedToken;
@@ -71,7 +83,7 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({ message: 'Token inválido o expirado.' });
     }
     // Actualizar contraseña y limpiar campos
-    user.password = await bcrypt.hash(password, 10);
+    user.password = password; // el pre('save') hará hashing
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
     await user.save();
