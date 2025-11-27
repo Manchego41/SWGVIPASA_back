@@ -9,53 +9,60 @@ const BASE_URL =
   (process.env.FRONT_URL && process.env.FRONT_URL.trim()) ||
   'http://localhost:5173';
 
-/**
- * Compatibilidad SDK:
- * - v2:  import { MercadoPagoConfig, Preference } from 'mercadopago'
- * - v1:  const mercadopago = require('mercadopago'); mercadopago.configure(...)
- */
+// SDK: compatible V1 o V2
 let useV2 = false;
 let PreferenceV2 = null;
 let mpClientV2 = null;
 let mpV1 = null;
 
 try {
-  // Intento v2 (si tu node_modules trae clases)
   const maybe = require('mercadopago');
   if (maybe && typeof maybe.MercadoPagoConfig === 'function') {
+    // SDK V2
     useV2 = true;
     PreferenceV2 = maybe.Preference;
-    mpClientV2 = new maybe.MercadoPagoConfig({ accessToken: MP_ACCESS_TOKEN });
+    mpClientV2 = new maybe.MercadoPagoConfig({
+      accessToken: MP_ACCESS_TOKEN
+    });
+    console.log("MP SDK: usando V2");
   } else {
-    // v1
+    // SDK V1
     mpV1 = require('mercadopago');
     mpV1.configure({ access_token: MP_ACCESS_TOKEN });
+    console.log("MP SDK: usando V1");
   }
 } catch (e) {
-  // fallback v1
+  // fallback V1
   mpV1 = require('mercadopago');
   mpV1.configure({ access_token: MP_ACCESS_TOKEN });
+  console.log("MP SDK: fallback V1");
 }
 
-/**
- * Crea preferencia usando v2 o v1 según lo disponible
- */
+// Función para crear preferencia
 async function createPreference({ items, back_urls, external_reference }) {
   if (useV2) {
     const pref = await new PreferenceV2(mpClientV2).create({
-      body: { items, back_urls, external_reference },
+      body: {
+        items,
+        back_urls,
+        external_reference,
+        auto_return: "approved"
+      }
     });
-    // v2 ya devuelve campos directos
+
     return {
       id: pref?.id,
       init_point: pref?.init_point,
       sandbox_init_point: pref?.sandbox_init_point,
     };
   } else {
-    // v1 devuelve en .body
     const pref = await mpV1.preferences.create({
-      items, back_urls, external_reference,
+      items,
+      back_urls,
+      external_reference,
+      auto_return: "approved",
     });
+
     return {
       id: pref?.body?.id,
       init_point: pref?.body?.init_point,
@@ -65,17 +72,35 @@ async function createPreference({ items, back_urls, external_reference }) {
 }
 
 // POST /api/payments/create
-// Body: { items: [{ title, unit_price, quantity, currency_id? }] }
 router.post('/create', async (req, res) => {
   try {
-    const itemsBody = Array.isArray(req.body?.items) ? req.body.items : [];
-    const items = (itemsBody.length ? itemsBody : [{ title: 'Productos', unit_price: 1, quantity: 1 }])
-      .map(it => ({
-        title: String(it.title || 'Producto'),
-        unit_price: Number(it.unit_price || 0),
-        quantity: Number(it.quantity || 1),
-        currency_id: it.currency_id || 'PEN',
-      }));
+    const itemsBody = Array.isArray(req.body.items) ? req.body.items : [];
+
+    if (!itemsBody.length) {
+      return res.status(400).json({ ok: false, message: "No llegaron items" });
+    }
+
+    // *** VALIDACIÓN FUERTE (evita unit_price = 0) ***
+    const items = itemsBody.map(it => {
+      if (!it.title) throw new Error("Item sin título");
+
+      const price = Number(it.unit_price);
+      if (!price || price <= 0) {
+        throw new Error("unit_price inválido. Debe ser mayor a 0");
+      }
+
+      const qty = Number(it.quantity);
+      if (!qty || qty <= 0) {
+        throw new Error("quantity inválido. Debe ser mayor a 0");
+      }
+
+      return {
+        title: String(it.title),
+        unit_price: price,
+        quantity: qty,
+        currency_id: "PEN"
+      };
+    });
 
     const back_urls = {
       success: `${BASE_URL}/payment-result?status=success`,
@@ -83,24 +108,27 @@ router.post('/create', async (req, res) => {
       pending: `${BASE_URL}/payment-result?status=pending`,
     };
 
-    // Nota: dejamos SIN auto_return para evitar el error “auto_return invalid...”
-    const r = await createPreference({
+    const pref = await createPreference({
       items,
       back_urls,
       external_reference: `order-${Date.now()}`,
     });
 
-    if (!r?.sandbox_init_point && !r?.init_point) {
-      return res.status(500).json({ ok: false, message: 'No se obtuvo init_point' });
+    if (!pref || (!pref.sandbox_init_point && !pref.init_point)) {
+      return res.status(500).json({ ok: false, message: "Mercado Pago no devolvió init_point" });
     }
 
-    res.json({ ok: true, ...r });
-  } catch (e) {
-    console.error('[MP create] error:', e?.message, e?.cause || e?.errors || e?.body);
-    res.status(500).json({ ok: false, message: 'Error creando preferencia' });
+    res.json({
+      ok: true,
+      id: pref.id,
+      init_point: pref.init_point,
+      sandbox_init_point: pref.sandbox_init_point,
+    });
+
+  } catch (err) {
+    console.error("[MP create] error:", err.message, err.errors || err.cause || err.body);
+    res.status(500).json({ ok: false, message: err.message || 'Error creando preferencia' });
   }
 });
 
 module.exports = router;
-
-
