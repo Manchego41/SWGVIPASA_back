@@ -185,10 +185,6 @@ exports.getMyReturns = async (req, res) => {
   }
 };
 
-/**
- * Permite al usuario dueño cancelar su devolución si está en estado 'processing'.
- * PATCH /api/returns/:id/cancel
- */
 exports.cancelMyReturn = async (req, res) => {
   try {
     const id = req.params.id;
@@ -263,6 +259,11 @@ exports.adminGet = async (req, res) => {
 /**
  * adminSetStatus: ahora restringido a los tres estados solicitados por ti.
  * PATCH /api/returns/:id/status
+ *
+ * - Si status === 'approved' :
+ *    * disminuye cantidades en la Purchase (ya lo hacías)
+ *    * recalcula total
+ *    * INCREMENTA el stock (countInStock) en Product si el item referenciaba product.
  */
 exports.adminSetStatus = async (req, res) => {
   if (!requireAdmin(req, res)) return;
@@ -273,38 +274,77 @@ exports.adminSetStatus = async (req, res) => {
     return res.status(400).json({ message: 'Estado inválido (solo processing/approved/rejected)' });
   }
   try {
-    // buscamos primero para validar estado actual (no permitir cambiar si ya fue cancelado)
-    const current = await Return.findById(req.params.id);
-    if (!current) return res.status(404).json({ message: 'No encontrado' });
+    const row = await Return.findById(req.params.id);
+    if (!row) return res.status(404).json({ message: 'No encontrado' });
 
-    if (current.status === 'canceled') {
+    // Si ya está cancelado no permitimos cambios
+    if (row.status === 'canceled') {
       return res.status(400).json({ message: 'Devolución cancelada por el cliente. No se puede modificar.' });
     }
 
-    // aplicar el cambio
-    const row = await Return.findByIdAndUpdate(
-      req.params.id,
-      { $set: { status } },
-      { new: true }
-    );
+    // Si estamos aprobando, ejecutamos la lógica de ajuste sobre la compra original
+    if (status === 'approved') {
+      try {
+        if (row.purchase && mongoose.isValidObjectId(row.purchase)) {
+          const purchase = await Purchase.findById(row.purchase);
+          if (purchase) {
+            // por cada ítem devuelto, localizar el item en purchase.items y restar cantidad y actualizar importes
+            let deltaTotal = 0;
+            for (const rit of (row.items || [])) {
+              // intentar emparejar por product _id o por productName
+              let target = null;
+              if (rit.product && mongoose.isValidObjectId(rit.product)) {
+                target = purchase.items.find(pi => String(pi.productId || pi.product || pi._id) === String(rit.product));
+              }
+              if (!target && rit.productName) {
+                target = purchase.items.find(pi => (pi.name || '').toLowerCase() === String(rit.productName || '').toLowerCase());
+              }
+              // fallback: si no hay product ref, intentar por price coincidencia y cantidad
+              if (!target && rit.unitPrice) {
+                target = purchase.items.find(pi => Number(pi.price || pi.unitPrice || 0) === Number(rit.unitPrice || 0));
+              }
 
-    if (!row) return res.status(404).json({ message: 'No encontrado' });
+              if (target) {
+                const toRemove = Math.min(Number(rit.quantity || 0), Number(target.quantity || 0));
+                if (toRemove > 0) {
+                  target.quantity = Number(target.quantity || 0) - toRemove;
+                  const price = Number(target.price || target.unitPrice || rit.unitPrice || 0);
+                  deltaTotal += price * toRemove;
 
+                  // Si existe referencia de producto, REPONER stock (incrementar)
+                  try {
+                    const pid = target.productId || target.product || rit.product || null;
+                    if (pid && mongoose.isValidObjectId(pid)) {
+                      await Product.findByIdAndUpdate(pid, { $inc: { countInStock: Number(toRemove) } }).exec();
+                    }
+                  } catch (e) {
+                    console.warn('adminSetStatus: fallo repone stock para product', rit.product, e?.message || e);
+                  }
+                }
+              }
+            }
+
+            // recalcular total de compra (si existe campo total)
+            if (typeof purchase.total === 'number') {
+              purchase.total = Math.max(0, Number(purchase.total) - deltaTotal);
+            }
+            await purchase.save();
+          }
+        }
+      } catch (err) {
+        console.warn('adminSetStatus: fallo ajustar compra al aprobar devolución (se continúa):', err?.message || err);
+      }
+    }
+
+    // Actualizar estado en retorno
+    row.status = status;
+    await row.save();
+
+    // Poblar para devolver al cliente admin
     const populated = await Return.findById(row._id)
       .populate('user', 'name email')
       .populate('items.product', 'name price imageUrl')
       .lean();
-
-    // opcional: enviar correo automático cuando se aprueba/rechaza (si tienes mailer)
-    try {
-      if (sendMail && (status === 'approved' || status === 'rejected')) {
-        const subj = status === 'approved' ? `Devolución ${populated.code || populated._id} ACEPTADA` : `Devolución ${populated.code || populated._id} RECHAZADA`;
-        const text = `Su solicitud ${populated.code || populated._id} ha sido ${status === 'approved' ? 'aceptada' : 'rechazada'}.`;
-        await sendMail({ to: (populated.user && populated.user.email) || '', subject: subj, text });
-      }
-    } catch (mailErr) {
-      console.warn('Mailer falló al notificar cambio de estado (se continúa):', mailErr?.message || mailErr);
-    }
 
     res.json(populated);
   } catch (e) {
@@ -313,29 +353,30 @@ exports.adminSetStatus = async (req, res) => {
   }
 };
 
+/**
+ * adminMessage: en lugar de enviar correo, ahora guarda una nota interna del admin (adminNote)
+ * POST /api/returns/:id/message
+ */
 exports.adminMessage = async (req, res) => {
   if (!requireAdmin(req, res)) return;
   try {
-    const row = await Return.findById(req.params.id).populate('user', 'name email');
+    const row = await Return.findById(req.params.id);
     if (!row) return res.status(404).json({ message: 'No encontrado' });
 
-    const message = (req.body.message || '').trim();
-    if (!message) return res.status(400).json({ message: 'Mensaje vacío' });
+    const note = (req.body.message || req.body.note || '').trim();
+    if (!note) return res.status(400).json({ message: 'Mensaje vacío' });
 
-    try {
-      if (sendMail) {
-        await sendMail({
-          to: row.user.email,
-          subject: `Devolución ${row.code || row._id} – Actualización`,
-          text: message
-        });
-      }
-    } catch (e) {
-      console.warn('Mailer falló (se continúa):', e.message);
-    }
+    // Guardamos la nota como campo adminNote
+    row.adminNote = (row.adminNote || []).concat({
+      text: note,
+      by: req.user._id,
+      at: new Date()
+    });
+    await row.save();
+
     res.json({ ok: true });
   } catch (e) {
     console.error('adminMessage error', e);
-    res.status(500).json({ message: 'Error enviando mensaje' });
+    res.status(500).json({ message: 'Error guardando nota' });
   }
 };

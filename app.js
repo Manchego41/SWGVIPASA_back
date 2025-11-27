@@ -27,5 +27,6 @@ app.use('/api/reports',   reportsRoutes);
 app.use('/api/purchases', purchasesRoutes);
 app.use('/api/favorites', favoritesRoutes);
 app.use('/api/returns',  returnRoutes);
+app.use('/api/cart', cartRoutes);
 
 module.exports = app;

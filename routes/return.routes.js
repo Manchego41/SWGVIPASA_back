@@ -7,12 +7,13 @@ const ReturnCtrl = require('../controllers/return.controller');
 // Cliente
 router.post('/', protect, ReturnCtrl.createMyReturn);
 router.get('/mine', protect, ReturnCtrl.getMyReturns);
-router.patch('/:id/cancel', protect, ReturnCtrl.cancelMyReturn); // ruta de cancelación por usuario
+router.patch('/:id/cancel', protect, ReturnCtrl.cancelMyReturn); // <<-- ruta de cancelación para el usuario
 
 // Admin
 router.get('/', protect, ReturnCtrl.adminList);
 router.get('/:id', protect, ReturnCtrl.adminGet);
 router.patch('/:id/status', protect, ReturnCtrl.adminSetStatus);
+// router.post('/:id/message', protect, ReturnCtrl.adminMessage); // opcional: ahora guarda nota interna
 router.post('/:id/message', protect, ReturnCtrl.adminMessage);
 
 module.exports = router;
