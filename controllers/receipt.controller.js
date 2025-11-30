@@ -1,46 +1,63 @@
-// SWGVIPASA_back/controllers/receipt.controller.js
+// controllers/receipt.controller.js
 const Receipt = require('../models/Receipt');
+const mongoose = require('mongoose');
 
+/**
+ * GET /api/cart/receipts/:id
+ * Devuelve el receipt (meta + qrDataUrl + documentHtml)
+ */
 exports.getReceipt = async (req, res) => {
   try {
     const id = req.params.id;
-    const r = await Receipt.findById(id).populate('purchase').lean();
-    if (!r) return res.status(404).json({ message: 'Boleta no encontrada' });
-
-    // seguridad: permitir solo al dueño o admin
-    const requester = req.user;
-    if (String(r.user) !== String(requester._id) && requester.role !== 'administrador') {
-      return res.status(403).json({ message: 'No autorizado' });
+    if (!id || !mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Id inválido' });
     }
-
-    res.json(r);
-  } catch (err) {
-    console.error('getReceipt', err);
-    res.status(500).json({ message: 'Error obteniendo boleta' });
+    const row = await Receipt.findById(id).lean();
+    if (!row) return res.status(404).json({ message: 'No encontrado' });
+    res.json(row);
+  } catch (e) {
+    console.error('getReceipt error', e);
+    res.status(500).json({ message: 'Error obteniendo receipt' });
   }
 };
 
-// endpoint para descargar imagen/archivo que devuelve el dataURL como imagen
+/**
+ * GET /api/cart/receipts/:id/download
+ * Si hay documentHtml -> lo envía como attachment HTML
+ * Si no hay HTML pero hay qrDataUrl -> decodifica base64 y lo envía como image/png
+ */
 exports.downloadQrImage = async (req, res) => {
   try {
-    const r = await Receipt.findById(req.params.id).lean();
-    if (!r) return res.status(404).send('Not found');
-    // seguridad:
-    if (String(r.user) !== String(req.user._id) && req.user.role !== 'administrador') {
-      return res.status(403).send('Forbidden');
+    const id = req.params.id;
+    if (!id || !mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ message: 'Id inválido' });
     }
-    // r.qrDataUrl es "data:image/png;base64,...."
-    const parts = (r.qrDataUrl || '').split(',');
-    if (parts.length !== 2) return res.status(400).send('No QR');
+    const row = await Receipt.findById(id).lean();
+    if (!row) return res.status(404).json({ message: 'No encontrado' });
 
-    const mime = parts[0].replace('data:', '').replace(';base64', '');
-    const buf = Buffer.from(parts[1], 'base64');
-    res.setHeader('Content-Type', mime);
-    // download filename:
-    res.setHeader('Content-Disposition', `attachment; filename="boleta-${r.code}.png"`);
-    res.send(buf);
-  } catch (err) {
-    console.error('downloadQrImage', err);
-    res.status(500).send('Error');
+    if (row.documentHtml) {
+      // descargar HTML
+      res.setHeader('Content-Disposition', `attachment; filename=boleta-${row.code || id}.html`);
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      return res.send(row.documentHtml);
+    }
+
+    if (row.qrDataUrl && String(row.qrDataUrl).startsWith('data:image/')) {
+      // data:image/png;base64,....
+      const parts = row.qrDataUrl.split(',');
+      const meta = parts[0];
+      const b64 = parts[1];
+      const buffer = Buffer.from(b64 || '', 'base64');
+      const ext = meta.includes('png') ? 'png' : (meta.includes('jpeg') ? 'jpg' : 'png');
+      res.setHeader('Content-Disposition', `attachment; filename=qr-${row.code || id}.${ext}`);
+      res.setHeader('Content-Type', `image/${ext}`);
+      return res.send(buffer);
+    }
+
+    // fallback: no content
+    return res.status(404).json({ message: 'No hay documento disponible para descargar' });
+  } catch (e) {
+    console.error('downloadQrImage error', e);
+    res.status(500).json({ message: 'Error descargando receipt' });
   }
 };

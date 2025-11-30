@@ -47,6 +47,12 @@ exports.createMyReturn = async (req, res) => {
     const purchase = await Purchase.findOne({ _id: purchaseId, user: req.user._id }).lean();
     if (!purchase) return res.status(404).json({ message: 'Compra no encontrada' });
 
+    // Bloquear devoluciones para compras pagadas en efectivo (según petición)
+    const payMethod = (purchase.payment && String(purchase.payment.method || '').toLowerCase()) || '';
+    if (payMethod === 'efectivo' || payMethod === 'cash' || payMethod === 'store') {
+      return res.status(400).json({ message: 'No se permiten devoluciones para compras pagadas en efectivo (boleta presencial).' });
+    }
+
     // Construir maps compatibles con distintas estructuras del subdoc
     const byId = new Map();            // por subdoc _id
     const byProductId = new Map();     // por subdoc.productId
@@ -338,6 +344,7 @@ exports.adminSetStatus = async (req, res) => {
 
     // Actualizar estado en retorno
     row.status = status;
+    row.updatedAt = new Date();
     await row.save();
 
     // Poblar para devolver al cliente admin
@@ -346,6 +353,7 @@ exports.adminSetStatus = async (req, res) => {
       .populate('items.product', 'name price imageUrl')
       .lean();
 
+    // OMITIDO envío de correo según tu petición
     res.json(populated);
   } catch (e) {
     console.error('adminSetStatus error', e);

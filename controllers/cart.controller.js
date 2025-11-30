@@ -3,21 +3,23 @@ const mongoose = require('mongoose');
 const CartItem = require('../models/CartItem');
 const Purchase = require('../models/purchase.model');
 const Product = require('../models/product.model');
-const User = require('../models/User'); // por si quieres actualizar contadores (opcional)
+const Receipt = require('../models/Receipt'); // modelo creado arriba
 
-function genReceiptCode() {
-  // Genera un código simple legible para el comprobante
-  return `RCPT-${Math.random().toString(36).slice(2,9).toUpperCase()}`;
+// QR generator opcional
+const QRCode = (() => {
+  try { return require('qrcode'); } catch (e) { return null; }
+})();
+
+function genCode(prefix = 'R') {
+  return `${prefix}-${Math.random().toString(36).slice(2,9).toUpperCase()}`;
 }
 
 /**
  * POST /api/cart  { productId }
- * - Si existe el item => incrementa quantity
- * - Si no existe     => crea con quantity=1
  */
 const addCart = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId        = req.user._id;
     const { productId } = req.body;
 
     let item = await CartItem.findOne({ user: userId, product: productId });
@@ -42,7 +44,7 @@ const addCart = async (req, res) => {
 const getCart = async (req, res) => {
   try {
     const userId = req.user._id;
-    const items = await CartItem.find({ user: userId }).populate('product');
+    const items  = await CartItem.find({ user: userId }).populate('product');
     res.json(items);
   } catch (err) {
     console.error('getCart error:', err);
@@ -52,13 +54,11 @@ const getCart = async (req, res) => {
 
 /**
  * DELETE /api/cart/:id
- * - /api/cart/:id?one=true => DECREMENTA 1 (si llega a 0, elimina)
- * - /api/cart/:id          => ELIMINA el ítem completo
  */
 const removeCart = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const { id } = req.params;
+    const userId  = req.user._id;
+    const { id }  = req.params;
 
     const raw = String(req.query.one ?? '').toLowerCase().trim();
     const removeOne = raw === 'true' || raw === '1' || raw === 'yes' || raw === 'y' || raw === 'on';
@@ -90,94 +90,152 @@ const removeCart = async (req, res) => {
 
 /**
  * POST /api/cart/checkout-local
- * - Genera una compra con los ítems actuales, ajusta stock y vacía el carrito
- * - Si method === 'efectivo' genera un receipt (simulado) y lo guarda dentro de la compra
  *
- * Respuesta: { message, purchase } -> la purchase contiene datos para que el front muestre/descargue el comprobante.
+ * Body: { method: 'visa'|'bcp'|'yape'|'plin'|'efectivo' }
+ *
+ * - crea purchase
+ * - decrementa stock
+ * - si efectivo: genera Receipt con qrDataUrl + documentHtml y devuelve receiptId
  */
 const checkoutLocal = async (req, res) => {
+  const session = await mongoose.startSession();
   try {
     const userId = req.user._id;
-    const { method = 'efectivo', metadata = {} } = req.body; // method puede venir desde frontend
+    const method = String(req.body.method || 'efectivo').toLowerCase();
 
-    const items = await CartItem.find({ user: userId }).populate('product');
-
-    if (!items.length) {
+    // Buscar ítems del carrito (no en una sesión todavía, los leeremos y luego actuamos en la transacción)
+    const cartItems = await CartItem.find({ user: userId }).populate('product');
+    if (!cartItems || cartItems.length === 0) {
       return res.status(400).json({ message: 'El carrito está vacío' });
     }
 
-    // Construir items para la compra
-    const purchaseItems = items.map((it) => ({
-      product: it.product?._id || it.product,
-      productId: it.product?._id || it.product, // redundante pero útil
-      name: it.product?.name || it.name,
-      price: it.product?.price || it.price || 0,
-      quantity: Number(it.quantity || 0)
-    }));
-
-    // Calcular total
-    const total = purchaseItems.reduce((acc, it) => {
-      const price = Number(it.price || 0);
-      return acc + price * (it.quantity || 0);
-    }, 0);
-
-    // Crear objeto de compra
-    const purchasePayload = {
-      user: userId,
-      items: purchaseItems,
-      total,
-      method: String(method).toLowerCase(),
-      metadata: metadata || {}
-    };
-
-    // Si es efectivo, generar un receipt simulado y guardarlo en la compra
-    if (String(method).toLowerCase() === 'efectivo' || String(method).toLowerCase() === 'cash') {
-      const rcpt = {
-        code: genReceiptCode(),
-        createdAt: new Date(),
-        // qrData puede ser una string que represente la URL o un contenido para generar QR en el front
-        qrData: `https://simulated.example/receipt/${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
-        note: 'Comprobante de pago en efectivo (simulado). Presente este código en tienda.'
+    // Construir purchaseItems
+    const purchaseItems = cartItems.map(it => {
+      const prod = it.product || {};
+      return {
+        product: prod._id || null,
+        productId: prod._id || null,
+        name: prod.name || it.name || 'Producto',
+        price: prod.price ?? it.price ?? 0,
+        quantity: Number(it.quantity || 0)
       };
-      purchasePayload.cashReceipt = rcpt;
-    }
+    });
 
-    // Crear la Purchase
-    const purchase = await Purchase.create(purchasePayload);
+    const total = purchaseItems.reduce((acc, it) => acc + Number(it.price || 0) * Number(it.quantity || 0), 0);
 
-    // Ajustar stock: decrementar countInStock si el producto existe
-    for (const it of purchaseItems) {
-      try {
-        const pid = it.product || it.productId || null;
-        const qty = Number(it.quantity || 0);
-        if (pid && mongoose.isValidObjectId(pid) && qty > 0) {
-          await Product.findByIdAndUpdate(pid, { $inc: { countInStock: -qty } }, { new: true }).exec();
+    let createdPurchase = null;
+    let createdReceipt = null;
+
+    // Ejecutar transacción para asegurar consistencia stock + purchase + clear cart + create receipt
+    await session.withTransaction(async () => {
+      // 1) Reducir stock de productos referenciados
+      for (const it of purchaseItems) {
+        if (it.product) {
+          // obtener con session
+          const prod = await Product.findById(it.product).session(session);
+          if (prod) {
+            const available = Number(prod.countInStock || 0);
+            if (available < Number(it.quantity || 0)) {
+              // lanzar error para abortar transacción
+              throw new Error(`Stock insuficiente para ${prod.name || 'producto'}`);
+            }
+            prod.countInStock = available - Number(it.quantity || 0);
+            await prod.save({ session });
+          }
         }
-      } catch (e) {
-        // no bloqueamos la compra si falla el ajuste de stock por algún motivo; lo logueamos
-        console.warn('checkoutLocal: fallo actualizar stock para item', it, e?.message || e);
       }
-    }
 
-    // Vaciar carrito del usuario
-    await CartItem.deleteMany({ user: userId });
+      // 2) Crear Purchase
+      const purchaseDoc = {
+        user: userId,
+        items: purchaseItems,
+        total,
+        method,
+        status: 'completed',
+        createdAt: new Date()
+      };
 
-    // Opcional: actualizar contador del usuario (si tienes un field tipo purchasesCount)
-    try {
-      await User.findByIdAndUpdate(userId, { $inc: { purchasesCount: 1 } }).exec();
-    } catch (e) {
-      // Si no existe esa propiedad en User, ignora
-    }
+      const created = await Purchase.create([purchaseDoc], { session });
+      createdPurchase = created[0];
 
-    // Poblar la respuesta básica para el front
-    const populated = await Purchase.findById(purchase._id)
-      .populate('items.product', 'name price imageUrl')
-      .lean();
+      // 3) Vaciar carrito
+      await CartItem.deleteMany({ user: userId }).session(session);
 
-    res.status(201).json({ message: 'Compra registrada', purchase: populated });
+      // 4) Si método efectivo -> generar QR + HTML + crear Receipt
+      if (method === 'efectivo' || method === 'cash') {
+        // payload para QR (compacto)
+        const qrPayload = {
+          receiptCode: genCode('R'),
+          purchaseId: String(createdPurchase._id),
+          userId: String(userId),
+          total,
+          createdAt: new Date().toISOString()
+        };
+
+        // generar data URL si biblioteca disponible
+        let qrDataUrl = null;
+        try {
+          if (QRCode && typeof QRCode.toDataURL === 'function') {
+            qrDataUrl = await QRCode.toDataURL(JSON.stringify(qrPayload));
+          }
+        } catch (e) {
+          console.warn('checkoutLocal: QR generation failed', e?.message || e);
+          qrDataUrl = null;
+        }
+
+        // generar HTML simple del comprobante (para abrir/descargar)
+        const code = qrPayload.receiptCode;
+        const html = `
+          <!doctype html>
+          <html>
+            <head><meta charset="utf-8"><title>Boleta ${code}</title></head>
+            <body style="font-family:Arial, Helvetica, sans-serif; padding:20px;">
+              <h2>Boleta de Pago - IPASA</h2>
+              <p><strong>Boleta:</strong> ${code}</p>
+              <p><strong>Compra:</strong> ${String(createdPurchase._id)}</p>
+              <p><strong>Total:</strong> S/ ${Number(total).toFixed(2)}</p>
+              <h3>Items</h3>
+              <ul>
+                ${purchaseItems.map(it => `<li>${it.quantity} x ${it.name} — S/ ${Number(it.price).toFixed(2)}</li>`).join('')}
+              </ul>
+              <div style="margin-top:20px;">
+                ${qrDataUrl ? `<img src="${qrDataUrl}" alt="QR" style="max-width:320px;"/>` : '<p>(QR no disponible)</p>'}
+                <p style="font-size:12px;color:#666">Muestra este código en caja para pagar en efectivo.</p>
+              </div>
+            </body>
+          </html>
+        `;
+
+        // crear Receipt en colección
+        const receiptDoc = {
+          code,
+          purchase: createdPurchase._id,
+          user: userId,
+          total,
+          method: 'efectivo',
+          qrDataUrl: qrDataUrl || undefined,
+          documentHtml: html
+        };
+
+        const receiptsCreated = await Receipt.create([receiptDoc], { session });
+        createdReceipt = receiptsCreated[0];
+      }
+    }); // end transaction
+
+    // Responder: purchase y, si existe, receiptId
+    const response = { message: 'Compra registrada', purchase: createdPurchase };
+    if (createdReceipt) response.receiptId = String(createdReceipt._id);
+
+    return res.status(201).json(response);
   } catch (err) {
     console.error('checkoutLocal error:', err);
-    res.status(500).json({ message: 'Error registrando la compra' });
+    // detectar error de stock
+    if (String(err.message || '').toLowerCase().includes('stock insuficiente')) {
+      return res.status(400).json({ message: err.message });
+    }
+    return res.status(500).json({ message: 'Error registrando la compra' });
+  } finally {
+    try { await session.endSession(); } catch(e) {}
   }
 };
 
@@ -185,5 +243,5 @@ module.exports = {
   addCart,
   getCart,
   removeCart,
-  checkoutLocal,
+  checkoutLocal
 };

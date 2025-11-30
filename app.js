@@ -10,6 +10,7 @@ const reportsRoutes   = require('./routes/reports.routes');
 const purchasesRoutes = require('./routes/purchase.routes');
 const favoritesRoutes = require('./routes/favorite.routes');
 const returnRoutes    = require('./routes/return.routes');
+const profileRoutes   = require('./routes/profile.routes');
 
 const app = express();
 
@@ -26,7 +27,7 @@ app.use('/api/cart',      cartRoutes);
 app.use('/api/reports',   reportsRoutes);
 app.use('/api/purchases', purchasesRoutes);
 app.use('/api/favorites', favoritesRoutes);
-app.use('/api/returns',  returnRoutes);
-app.use('/api/cart', cartRoutes);
+app.use('/api/returns',   returnRoutes);
+app.use('/api/profile', profileRoutes);
 
 module.exports = app;
