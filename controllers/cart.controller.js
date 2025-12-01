@@ -1,9 +1,9 @@
-// controllers/cart.controller.js
+// SWGVIPASA_back/controllers/cart.controller.js
 const mongoose = require('mongoose');
 const CartItem = require('../models/CartItem');
 const Purchase = require('../models/purchase.model');
 const Product = require('../models/product.model');
-const Receipt = require('../models/Receipt'); // modelo creado arriba
+const Receipt = require('../models/Receipt'); // modelo actualizado con documentHtml
 
 // QR generator opcional
 const QRCode = (() => {
@@ -73,7 +73,7 @@ const removeCart = async (req, res) => {
         item.quantity = Number(item.quantity) - 1;
         await item.save();
         await item.populate('product');
-        return res.json(item); // Ítem actualizado (qty-1)
+        return res.json(item);
       } else {
         await CartItem.findByIdAndDelete(id);
         return res.json({ message: 'Ítem eliminado' });
@@ -103,7 +103,7 @@ const checkoutLocal = async (req, res) => {
     const userId = req.user._id;
     const method = String(req.body.method || 'efectivo').toLowerCase();
 
-    // Buscar ítems del carrito (no en una sesión todavía, los leeremos y luego actuamos en la transacción)
+    // Traer items del carrito
     const cartItems = await CartItem.find({ user: userId }).populate('product');
     if (!cartItems || cartItems.length === 0) {
       return res.status(400).json({ message: 'El carrito está vacío' });
@@ -114,7 +114,6 @@ const checkoutLocal = async (req, res) => {
       const prod = it.product || {};
       return {
         product: prod._id || null,
-        productId: prod._id || null,
         name: prod.name || it.name || 'Producto',
         price: prod.price ?? it.price ?? 0,
         quantity: Number(it.quantity || 0)
@@ -126,17 +125,33 @@ const checkoutLocal = async (req, res) => {
     let createdPurchase = null;
     let createdReceipt = null;
 
-    // Ejecutar transacción para asegurar consistencia stock + purchase + clear cart + create receipt
+    // Determinar un status válido para Purchase a partir del schema (evita ValidationError)
+    let desiredStatus = undefined;
+    try {
+      const statusPath = Purchase.schema.path('status');
+      if (statusPath && Array.isArray(statusPath.enumValues) && statusPath.enumValues.length) {
+        // preferir 'paid' si existe, sino 'completed' si existe, sino el primero
+        if (statusPath.enumValues.includes('paid')) desiredStatus = 'paid';
+        else if (statusPath.enumValues.includes('completed')) desiredStatus = 'completed';
+        else desiredStatus = statusPath.enumValues[0];
+      } else {
+        // si no hay enum en schema, no forzamos status (dejar que schema ponga default)
+        desiredStatus = undefined;
+      }
+    } catch (e) {
+      console.warn('No se pudo leer enum de Purchase.status, dejándolo por default', e?.message || e);
+      desiredStatus = undefined;
+    }
+
+    // Ejecutar transacción
     await session.withTransaction(async () => {
-      // 1) Reducir stock de productos referenciados
+      // 1) Reducir stock por cada producto con sesión
       for (const it of purchaseItems) {
         if (it.product) {
-          // obtener con session
           const prod = await Product.findById(it.product).session(session);
           if (prod) {
             const available = Number(prod.countInStock || 0);
             if (available < Number(it.quantity || 0)) {
-              // lanzar error para abortar transacción
               throw new Error(`Stock insuficiente para ${prod.name || 'producto'}`);
             }
             prod.countInStock = available - Number(it.quantity || 0);
@@ -145,25 +160,28 @@ const checkoutLocal = async (req, res) => {
         }
       }
 
-      // 2) Crear Purchase
+      // 2) Crear Purchase (con session)
       const purchaseDoc = {
         user: userId,
         items: purchaseItems,
         total,
-        method,
-        status: 'completed',
+        payment: { method }, // conservar forma: payment.method
         createdAt: new Date()
       };
+
+      // adjuntar status solo si determinamos uno válido
+      if (typeof desiredStatus !== 'undefined') {
+        purchaseDoc.status = desiredStatus;
+      }
 
       const created = await Purchase.create([purchaseDoc], { session });
       createdPurchase = created[0];
 
-      // 3) Vaciar carrito
+      // 3) Vaciar carrito (con session)
       await CartItem.deleteMany({ user: userId }).session(session);
 
-      // 4) Si método efectivo -> generar QR + HTML + crear Receipt
+      // 4) Si efectivo -> generar receipt (QR + HTML) y guardarlo
       if (method === 'efectivo' || method === 'cash') {
-        // payload para QR (compacto)
         const qrPayload = {
           receiptCode: genCode('R'),
           purchaseId: String(createdPurchase._id),
@@ -172,7 +190,6 @@ const checkoutLocal = async (req, res) => {
           createdAt: new Date().toISOString()
         };
 
-        // generar data URL si biblioteca disponible
         let qrDataUrl = null;
         try {
           if (QRCode && typeof QRCode.toDataURL === 'function') {
@@ -183,7 +200,6 @@ const checkoutLocal = async (req, res) => {
           qrDataUrl = null;
         }
 
-        // generar HTML simple del comprobante (para abrir/descargar)
         const code = qrPayload.receiptCode;
         const html = `
           <!doctype html>
@@ -206,7 +222,6 @@ const checkoutLocal = async (req, res) => {
           </html>
         `;
 
-        // crear Receipt en colección
         const receiptDoc = {
           code,
           purchase: createdPurchase._id,
@@ -220,16 +235,16 @@ const checkoutLocal = async (req, res) => {
         const receiptsCreated = await Receipt.create([receiptDoc], { session });
         createdReceipt = receiptsCreated[0];
       }
-    }); // end transaction
+    }); // end withTransaction
 
-    // Responder: purchase y, si existe, receiptId
+    // Responder
     const response = { message: 'Compra registrada', purchase: createdPurchase };
     if (createdReceipt) response.receiptId = String(createdReceipt._id);
-
     return res.status(201).json(response);
+
   } catch (err) {
-    console.error('checkoutLocal error:', err);
-    // detectar error de stock
+    // logging extenso para detectar la causa
+    console.error('checkoutLocal error:', (err && err.stack) ? err.stack : err);
     if (String(err.message || '').toLowerCase().includes('stock insuficiente')) {
       return res.status(400).json({ message: err.message });
     }

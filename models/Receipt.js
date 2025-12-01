@@ -11,13 +11,15 @@ const receiptSchema = new mongoose.Schema({
   // Guardamos el QR como dataURL (base64 image/png) para mostrar/download rápido.
   qrDataUrl: { type: String },
 
-  // HTML del comprobante (para abrir/descargar)
+  // HTML del comprobante para descarga/visualización rápida (opcional)
   documentHtml: { type: String },
 
   // opcional: url a archivo pdf si generas PDF en disco/almacenamiento en el futuro
   pdfUrl: { type: String },
 
   createdAt: { type: Date, default: Date.now }
+}, {
+  strict: false // permitir campos extras si en el futuro quieres agregar metadata sin romper
 });
 
 module.exports = mongoose.models.Receipt || mongoose.model('Receipt', receiptSchema);
